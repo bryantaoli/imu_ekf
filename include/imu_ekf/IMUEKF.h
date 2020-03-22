@@ -112,6 +112,7 @@ public:
 
 	Quaterniond qib_, qis_;
 
+	double timestamps;
 	//Sampling time = 1.0/Sampling Frequency
 	double dt;
 

@@ -139,14 +139,13 @@ void imu_estimator::voCb(const geometry_msgs::PoseStamped::ConstPtr& msg)
 
 imu_estimator::imu_estimator() 
 {
-
 	useVO = false;
 	useOdom = false;
 	useTwist = false;
-
 }
 
-imu_estimator::~imu_estimator() {
+imu_estimator::~imu_estimator() 
+{
 	if (is_connected_)
 		disconnect();
 }
@@ -191,7 +190,6 @@ bool imu_estimator::connected() {
 
 void imu_estimator::subscribe()
 {
-
 	subscribeToIMU();
 
 	if (useVO)
@@ -207,8 +205,6 @@ void imu_estimator::subscribe()
 }
 
 void imu_estimator::init() {
-
-
 	// Initialize the IMU based EKF 
 	imuEKF = new IMUEKF;
 	imuEKF->init();
@@ -217,9 +213,6 @@ void imu_estimator::init() {
 	vo_inc = false;
 	odom_inc = false;
 	twist_inc = false;
-
-
-
 }
 
 void imu_estimator::reconfigureCB(imu_ekf::ParamControlConfig& config, uint32_t level)
@@ -254,16 +247,12 @@ void imu_estimator::reconfigureCB(imu_ekf::ParamControlConfig& config, uint32_t 
       imuEKF->KinSTDOrientx = config.KinSTDOrientx; 
       imuEKF->KinSTDOrienty = config.KinSTDOrienty; 
       imuEKF->KinSTDOrientz = config.KinSTDOrientz; 
-
-
-
 }
 
 void imu_estimator::run() {
 	while (ros::ok()) {
 		predictWithImu = false;
 		static ros::Rate rate(freq);  //ROS Node Loop Rate
-
 
 		estimateWithIMUEKF();
 
@@ -298,6 +287,7 @@ void imu_estimator::estimateWithIMUEKF()
 		//Predict with the IMU gyro and acceleration
 		if(imu_inc && !predictWithImu &&!imuEKF->firstrun){
 			//std::cout<<"Imu "<<std::endl;
+			imuEKF->timestamps=imu_msg.header.stamp.sec+imu_msg.header.stamp.nsec*1e-9;
 			imuEKF->predict(Vector3d(imu_msg.angular_velocity.x,imu_msg.angular_velocity.y,imu_msg.angular_velocity.z),
 			Vector3d(imu_msg.linear_acceleration.x,imu_msg.linear_acceleration.y,imu_msg.linear_acceleration.z));
 			imu_inc = false;
@@ -311,6 +301,7 @@ void imu_estimator::estimateWithIMUEKF()
 		{
 			if(odom_inc && predictWithImu){
 				//std::cout<<"Odom "<<std::endl;
+				imuEKF->timestamps=odom_msg.header.stamp.sec+odom_msg.header.stamp.nsec*1e-9;
 				imuEKF->updateWithOdom(Vector3d(odom_msg.pose.pose.position.x,odom_msg.pose.pose.position.y,odom_msg.pose.pose.position.z),
 				Quaterniond(odom_msg.pose.pose.orientation.w,odom_msg.pose.pose.orientation.x,odom_msg.pose.pose.orientation.y,odom_msg.pose.pose.orientation.z));
 				odom_inc = false;
@@ -320,7 +311,7 @@ void imu_estimator::estimateWithIMUEKF()
 		{
 			if(vo_inc && predictWithImu)
 			{
-
+				imuEKF->timestamps=vo_msg.header.stamp.sec+vo_msg.header.stamp.nsec*1e-9;
 				imuEKF->updatewithVO(Vector3d(vo_msg.pose.position.x,vo_msg.pose.position.y,vo_msg.pose.position.z),
 				Quaterniond(vo_msg.pose.orientation.w,vo_msg.pose.orientation.x,vo_msg.pose.orientation.y,vo_msg.pose.orientation.z));
 				vo_inc = false;
@@ -330,6 +321,7 @@ void imu_estimator::estimateWithIMUEKF()
 		{		
 			if(twist_inc && predictWithImu)
 			{
+				imuEKF->timestamps=twist_msg.header.stamp.sec+twist_msg.header.stamp.nsec*1e-9;
 				imuEKF->updateWithTwist(Vector3d(twist_msg.twist.linear.x,twist_msg.twist.linear.y,twist_msg.twist.linear.z),
 				Quaterniond(imu_msg.orientation.w,imu_msg.orientation.x,imu_msg.orientation.y,imu_msg.orientation.z));
 				twist_inc = false;
@@ -353,6 +345,7 @@ void imu_estimator::deAllocate()
 
 
 void imu_estimator::publishBodyEstimates() {
+
 	bodyPose_est_msg.header.stamp = ros::Time::now();
 	bodyPose_est_msg.header.frame_id = "odom";
 	bodyPose_est_msg.pose.position.x = imuEKF->rX;
@@ -385,13 +378,17 @@ void imu_estimator::publishBodyEstimates() {
 	bodyAcc_est_pub.publish(bodyAcc_est_msg);
 
 
-	odom_est_msg.header.stamp=ros::Time::now();
-	odom_est_msg.header.frame_id = "odom";
-	odom_est_msg.pose.pose = bodyPose_est_msg.pose;
-	odom_est_msg.twist.twist = bodyVel_est_msg.twist;
-	odom_est_pub.publish(odom_est_msg);
-
-
+	//时间戳为0意味着滤波器还没开始
+	if(imuEKF->timestamps!=0)
+	{
+		//odom_est_msg.header.stamp=ros::Time::now();
+		ros::Time xx(imuEKF->timestamps);
+		odom_est_msg.header.stamp=xx;
+		odom_est_msg.header.frame_id = "odom";
+		odom_est_msg.pose.pose = bodyPose_est_msg.pose;
+		odom_est_msg.twist.twist = bodyVel_est_msg.twist;
+		odom_est_pub.publish(odom_est_msg);
+	}
 }
 
 

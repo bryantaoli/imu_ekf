@@ -32,9 +32,8 @@
 #include "imu_ekf/IMUEKF.h"
 
 
-void IMUEKF::init() {
-
-
+void IMUEKF::init() 
+{
 	firstrun = true;
 	P = Matrix<double, 15, 15>::Identity() * (1e-3);
 	P(9, 9) = 1e-6;
@@ -43,8 +42,6 @@ void IMUEKF::init() {
 	P(12, 12) = 1e-7;
 	P(13, 13) = 1e-7;
 	P(14, 14) = 1e-7;
-
-
 
 	//Construct C
 	Hf = Matrix<double, 6,15>::Zero();
@@ -120,109 +117,107 @@ void IMUEKF::init() {
 /** IMU EKF filter to  deal with the Noise **/
 void IMUEKF::predict(Vector3d omega_, Vector3d f_)
 {
+	omega = omega_;
+	f = f_;
 
-		omega = omega_;
-		f = f_;
+	// relative velocity
+	v = x.segment<3>(0);
+	// absolute position
+	r = x.segment<3>(6);
+	// biases
+	bw = x.segment<3>(9);
+	bf = x.segment<3>(12);
+	
+	// Correct the inputs
+	fhat = f - bf;
+	omegahat = omega - bw;
 
-		// relative velocity
-		v = x.segment<3>(0);
-		// absolute position
-		r = x.segment<3>(6);
-		// biases
-		bw = x.segment<3>(9);
-		bf = x.segment<3>(12);
-		
-		// Correct the inputs
-		fhat = f - bf;
-		omegahat = omega - bw;
+	/** Linearization **/
+	//Transition matrix Jacobian
+	Acf.block<3,3>(0,0) = -wedge(omegahat);
+	Acf.block<3,3>(0,3) = wedge(Rib.transpose() * g);
+	Acf.block<3,3>(3,3) = -wedge(omegahat);
+	Acf.block<3,3>(6,0) = Rib;
+	Acf.block<3,3>(6,3).noalias() = -Rib * wedge(v);
+	Acf.block<3,3>(0,9) = -wedge(v);
+	Acf.block<3,3>(0,12) = -Matrix3d::Identity();
+	Acf.block<3,3>(3,9) = -Matrix3d::Identity();
 
-		/** Linearization **/
-		//Transition matrix Jacobian
-		Acf.block<3,3>(0,0) = -wedge(omegahat);
-		Acf.block<3,3>(0,3) = wedge(Rib.transpose() * g);
-		Acf.block<3,3>(3,3) = -wedge(omegahat);
-		Acf.block<3,3>(6,0) = Rib;
-		Acf.block<3,3>(6,3).noalias() = -Rib * wedge(v);
-		Acf.block<3,3>(0,9) = -wedge(v);
-		Acf.block<3,3>(0,12) = -Matrix3d::Identity();
-		Acf.block<3,3>(3,9) = -Matrix3d::Identity();
+	
 
-		
-
-		
-		//State Noise Jacobian
-		//gyro (0),acc (3),gyro_bias (6),acc_bias (9),foot_pos (12),foot_psi (15)		
-		Lcf.block<3,3>(0,0) = wedge(v);
-		Lcf.block<3,3>(0,3) = Matrix3d::Identity();
-		Lcf.block<3,3>(3,0) = Matrix3d::Identity(); 	
-		Lcf.block<3,3>(9,6) = Matrix3d::Identity();
-		Lcf.block<3,3>(12,9) = Matrix3d::Identity();
+	
+	//State Noise Jacobian
+	//gyro (0),acc (3),gyro_bias (6),acc_bias (9),foot_pos (12),foot_psi (15)		
+	Lcf.block<3,3>(0,0) = wedge(v);
+	Lcf.block<3,3>(0,3) = Matrix3d::Identity();
+	Lcf.block<3,3>(3,0) = Matrix3d::Identity(); 	
+	Lcf.block<3,3>(9,6) = Matrix3d::Identity();
+	Lcf.block<3,3>(12,9) = Matrix3d::Identity();
 
 
-		// Covariance Q with full state + biases
-		Qf(0, 0) = GyroSTDx * GyroSTDx;
-		Qf(1, 1) = GyroSTDy * GyroSTDy;
-		Qf(2, 2) = GyroSTDz * GyroSTDz;
-		Qf(3, 3) = AccSTDx * AccSTDx;
-		Qf(4, 4) = AccSTDy * AccSTDy;
-		Qf(5, 5) = AccSTDz * AccSTDz;
-		Qf(6, 6) = GyroBiasSTDx * GyroBiasSTDx;
-		Qf(7, 7) = GyroBiasSTDy * GyroBiasSTDy;
-		Qf(8, 8) = GyroBiasSTDz * GyroBiasSTDz;
-		Qf(9, 9) = AccBiasSTDx * AccBiasSTDx;
-		Qf(10, 10) = AccBiasSTDy * AccBiasSTDy;
-		Qf(11, 11) = AccBiasSTDz * AccBiasSTDz;
-		
+	// Covariance Q with full state + biases
+	Qf(0, 0) = GyroSTDx * GyroSTDx;
+	Qf(1, 1) = GyroSTDy * GyroSTDy;
+	Qf(2, 2) = GyroSTDz * GyroSTDz;
+	Qf(3, 3) = AccSTDx * AccSTDx;
+	Qf(4, 4) = AccSTDy * AccSTDy;
+	Qf(5, 5) = AccSTDz * AccSTDz;
+	Qf(6, 6) = GyroBiasSTDx * GyroBiasSTDx;
+	Qf(7, 7) = GyroBiasSTDy * GyroBiasSTDy;
+	Qf(8, 8) = GyroBiasSTDz * GyroBiasSTDz;
+	Qf(9, 9) = AccBiasSTDx * AccBiasSTDx;
+	Qf(10, 10) = AccBiasSTDy * AccBiasSTDy;
+	Qf(11, 11) = AccBiasSTDz * AccBiasSTDz;
+	
 
-		//Euler Discretization - ZOH
-		
-		Af = If;
-		Af.noalias() +=  Acf * dt;
-		Qff.noalias() =  Af * Lcf * Qf * Lcf.transpose() * Af.transpose() * dt ;
+	//Euler Discretization - ZOH
+	
+	Af = If;
+	Af.noalias() +=  Acf * dt;
+	Qff.noalias() =  Af * Lcf * Qf * Lcf.transpose() * Af.transpose() * dt ;
 
-		/** Predict Step: Propagate the Error Covariance  **/
-		P = Af * P * Af.transpose() + Qff;
-  		
-		/** Predict Step : Propagate the Mean estimate **/
-		//Body Velocity
-		temp = v.cross(omegahat) + Rib.transpose() * g + fhat;
-		temp *= dt;
-		
-		x(0) = v(0) + temp(0);
-		x(1) = v(1) + temp(1);
-		x(2) = v(2) + temp(2);
+	/** Predict Step: Propagate the Error Covariance  **/
+	P = Af * P * Af.transpose() + Qff;
+	
+	/** Predict Step : Propagate the Mean estimate **/
+	//Body Velocity
+	temp = v.cross(omegahat) + Rib.transpose() * g + fhat;
+	temp *= dt;
+	
+	x(0) = v(0) + temp(0);
+	x(1) = v(1) + temp(1);
+	x(2) = v(2) + temp(2);
 
-		x(3) = 0;
-		x(4) = 0;
-		x(5) = 0;
+	x(3) = 0;
+	x(4) = 0;
+	x(5) = 0;
 
-		//Body position
-		temp = Rib * v;
-		temp *= dt;
-		x(6) = r(0) + temp(0);
-		x(7) = r(1) + temp(1);
-		x(8) = r(2) + temp(2);
+	//Body position
+	temp = Rib * v;
+	temp *= dt;
+	x(6) = r(0) + temp(0);
+	x(7) = r(1) + temp(1);
+	x(8) = r(2) + temp(2);
 
-		//Gyro bias
-		x(9)  = bw(0);
-		x(10) = bw(1);
-		x(11) = bw(2);
+	//Gyro bias
+	x(9)  = bw(0);
+	x(10) = bw(1);
+	x(11) = bw(2);
 
-		//Acc bias
-		x(12) = bf(0);
-		x(13) = bf(1);
-		x(14) = bf(2);
+	//Acc bias
+	x(12) = bf(0);
+	x(13) = bf(1);
+	x(14) = bf(2);
 
-		
+	
 
-		//Propagate only if non-zero input
-		temp = omegahat;
-		temp *= dt;
-		if (temp(0) != 0.0000 && temp(1) != 0.0000 && temp(2) != 0.0000) {
-			Rib  *=  expMap(temp, 1.0);
-		}
-		updateVars();
-
+	//Propagate only if non-zero input
+	temp = omegahat;
+	temp *= dt;
+	if (temp(0) != 0.0000 && temp(1) != 0.0000 && temp(2) != 0.0000) {
+		Rib  *=  expMap(temp, 1.0);
+	}
+	updateVars();
 }
 
 		/** Update **/
@@ -283,112 +278,110 @@ void IMUEKF::updatewithVO(Vector3d y, Quaterniond qy){
 
 void IMUEKF::updateWithOdom(Vector3d y, Quaterniond qy)
 {
+	Hf.noalias() = Matrix<double,6,15>::Zero();
 
-		Hf.noalias() = Matrix<double,6,15>::Zero();
+	R(0, 0) = KinSTDx * KinSTDx;
+	R(1, 1) = KinSTDy * KinSTDy;
+	R(2, 2) = KinSTDz * KinSTDz;
 
-		R(0, 0) = KinSTDx * KinSTDx;
-		R(1, 1) = KinSTDy * KinSTDy;
-		R(2, 2) = KinSTDz * KinSTDz;
+	R(3, 3) = KinSTDOrientx * KinSTDOrientx;
+	R(4, 4) = KinSTDOrienty * KinSTDOrienty;
+	R(5, 5) = KinSTDOrientz * KinSTDOrientz;
 
-		R(3, 3) = KinSTDOrientx * KinSTDOrientx;
-		R(4, 4) = KinSTDOrienty * KinSTDOrienty;
-		R(5, 5) = KinSTDOrientz * KinSTDOrientz;
-
-		r = x.segment<3>(6);
-
-
-		//Innovetion vector
-		z.segment<3>(0).noalias() = y - r;
+	r = x.segment<3>(6);
 
 
-		Hf.block<3,3>(0,6) = Matrix3d::Identity();
+	//Innovetion vector
+	z.segment<3>(0).noalias() = y - r;
 
 
-		Quaterniond qib(Rib);
-		z.segment<3>(3) = logMap( (qy * qib.inverse() ));
-
-		Hf.block<3,3>(3,3) = Matrix3d::Identity();
+	Hf.block<3,3>(0,6) = Matrix3d::Identity();
 
 
+	Quaterniond qib(Rib);
+	z.segment<3>(3) = logMap( (qy * qib.inverse() ));
 
-        s = R;
-		s.noalias() += Hf * P * Hf.transpose();
-		Kf.noalias() = P * Hf.transpose() * s.inverse();
-
-		dxf.noalias() = Kf * z;
-
-		//Update the mean estimate
-		x += dxf;
-
-		//Update the error covariance
-		P = (If - Kf * Hf) * P * (If - Kf * Hf).transpose() + Kf * R * Kf.transpose();
+	Hf.block<3,3>(3,3) = Matrix3d::Identity();
 
 
-		if (dxf(3) != 0.000 && dxf(4) != 0.000 && dxf(5) != 0.000) {
-			temp(0) = dxf(3);
-			temp(1) = dxf(4);
-			temp(2) = dxf(5);
-			Rib *=  expMap(dxf.segment<3>(3), 1.0);
-		}
-		x.segment<3>(3) = Vector3d::Zero();
-		updateVars();
+
+	s = R;
+	s.noalias() += Hf * P * Hf.transpose();
+	Kf.noalias() = P * Hf.transpose() * s.inverse();
+
+	dxf.noalias() = Kf * z;
+
+	//Update the mean estimate
+	x += dxf;
+
+	//Update the error covariance
+	P = (If - Kf * Hf) * P * (If - Kf * Hf).transpose() + Kf * R * Kf.transpose();
+
+
+	if (dxf(3) != 0.000 && dxf(4) != 0.000 && dxf(5) != 0.000) {
+		temp(0) = dxf(3);
+		temp(1) = dxf(4);
+		temp(2) = dxf(5);
+		Rib *=  expMap(dxf.segment<3>(3), 1.0);
+	}
+	x.segment<3>(3) = Vector3d::Zero();
+	updateVars();
 }
 
 
 		/** Update **/
-void IMUEKF::updateWithTwist(Vector3d y, Quaterniond qy){
+void IMUEKF::updateWithTwist(Vector3d y, Quaterniond qy)
+{
+	Hf.noalias() = Matrix<double,6,15>::Zero();
 
-		Hf.noalias() = Matrix<double,6,15>::Zero();
+	R(0, 0) = KinSTDx * KinSTDx;
+	R(1, 1) = KinSTDy * KinSTDy;
+	R(2, 2) = KinSTDz * KinSTDz;
 
-		R(0, 0) = KinSTDx * KinSTDx;
-		R(1, 1) = KinSTDy * KinSTDy;
-		R(2, 2) = KinSTDz * KinSTDz;
+	R(3, 3) = KinSTDOrientx * KinSTDOrientx;
+	R(4, 4) = KinSTDOrienty * KinSTDOrienty;
+	R(5, 5) = KinSTDOrientz * KinSTDOrientz;
 
-		R(3, 3) = KinSTDOrientx * KinSTDOrientx;
-		R(4, 4) = KinSTDOrienty * KinSTDOrienty;
-		R(5, 5) = KinSTDOrientz * KinSTDOrientz;
-
-		v = x.segment<3>(0);
-
-
-		//Innovetion vector
-		z.segment<3>(0).noalias() = y - Rib * v;
+	v = x.segment<3>(0);
 
 
-		Hf.block<3,3>(0,0) = Rib;
-		Hf.block<3,3>(0,3).noalias() = -Rib * wedge(v);
+	//Innovetion vector
+	z.segment<3>(0).noalias() = y - Rib * v;
 
 
-		Quaterniond qib(Rib);
-		//MAYBE qib.inverse() * qy BODY LOCAL PERTUBATION
-		z.segment<3>(3) = logMap( (qy * qib.inverse() ));
-
-		Hf.block<3,3>(3,3) = Matrix3d::Identity();
+	Hf.block<3,3>(0,0) = Rib;
+	Hf.block<3,3>(0,3).noalias() = -Rib * wedge(v);
 
 
+	Quaterniond qib(Rib);
+	//MAYBE qib.inverse() * qy BODY LOCAL PERTUBATION
+	z.segment<3>(3) = logMap( (qy * qib.inverse() ));
 
-        s = R;
-		s.noalias() += Hf * P * Hf.transpose();
-		Kf.noalias() = P * Hf.transpose() * s.inverse();
-
-		dxf.noalias() = Kf * z;
-
-		//Update the mean estimate
-		x += dxf;
-
-		//Update the error covariance
-		P = (If - Kf * Hf) * P * (If - Kf * Hf).transpose() + Kf * R * Kf.transpose();
+	Hf.block<3,3>(3,3) = Matrix3d::Identity();
 
 
-		if (dxf(3) != 0.000 && dxf(4) != 0.000 && dxf(5) != 0.000) {
-			temp(0) = dxf(3);
-			temp(1) = dxf(4);
-			temp(2) = dxf(5);
-			Rib *=  expMap(dxf.segment<3>(3), 1.0);
-		}
-		x.segment<3>(3) = Vector3d::Zero();
+	s = R;
+	s.noalias() += Hf * P * Hf.transpose();
+	Kf.noalias() = P * Hf.transpose() * s.inverse();
 
-		updateVars();
+	dxf.noalias() = Kf * z;
+
+	//Update the mean estimate
+	x += dxf;
+
+	//Update the error covariance
+	P = (If - Kf * Hf) * P * (If - Kf * Hf).transpose() + Kf * R * Kf.transpose();
+
+
+	if (dxf(3) != 0.000 && dxf(4) != 0.000 && dxf(5) != 0.000) {
+		temp(0) = dxf(3);
+		temp(1) = dxf(4);
+		temp(2) = dxf(5);
+		Rib *=  expMap(dxf.segment<3>(3), 1.0);
+	}
+	x.segment<3>(3) = Vector3d::Zero();
+
+	updateVars();
 }
 
 
@@ -396,8 +389,6 @@ void IMUEKF::updateWithTwist(Vector3d y, Quaterniond qy){
 
 void IMUEKF::updateVars()
 {
-	
-
 	updateTF();
 
 	//Update the biases
@@ -407,7 +398,6 @@ void IMUEKF::updateVars()
 	biasAX = x(12);
 	biasAY = x(13);
 	biasAZ = x(14);
-
 
 	omegahat.noalias() = omega - Vector3d(x(9), x(10), x(11));
 	fhat.noalias() = f - Vector3d(x(12), x(13), x(14));
@@ -435,8 +425,8 @@ void IMUEKF::updateVars()
 	angleZ = temp(2);
 }
 
-void IMUEKF::updateTF() {
-
+void IMUEKF::updateTF() 
+{
 	Tib.linear() = Rib;
 	Tib.translation() = r;
 	qib_ = Quaterniond(Tib.linear());

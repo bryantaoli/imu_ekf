@@ -1,12 +1,12 @@
 imu_topic_freq: 100
 gravity: 9.80665
 
-useOdom: false
+useOdom: true
 useVO: false
-useTwist: true
+useTwist: false
 camera_vo_topic: "pose"
-odom_topic: "odom"
-imu_topic: "imu"
+odom_topic: "/firefly_sbx/vio/odom"
+imu_topic: "/imu0"
 twist_topic: "twist"
 #Process Noise STDs
 AccBiasSTDx:  0.000382554 #  m/s^2/sqrt(Hz)
