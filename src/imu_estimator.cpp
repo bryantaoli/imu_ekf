@@ -80,6 +80,7 @@ void imu_estimator::loadIMUEKFparams()
 	n_p.getParam("KinSTDx", imuEKF->KinSTDx);
 	n_p.getParam("KinSTDy", imuEKF->KinSTDy);
 	n_p.getParam("KinSTDz", imuEKF->KinSTDz);
+	
 	n_p.getParam("KinSTDOrientx", imuEKF->KinSTDOrientx);
 	n_p.getParam("KinSTDOrienty", imuEKF->KinSTDOrienty);
 	n_p.getParam("KinSTDOrientz", imuEKF->KinSTDOrientz);
@@ -89,16 +90,7 @@ void imu_estimator::loadIMUEKFparams()
 
 
 
-void imu_estimator::subscribeToOdom()
-{
-	odom_sub = n.subscribe(odom_topic,1,&imu_estimator::odomCb,this);
-}
 
-void imu_estimator::odomCb(const nav_msgs::Odometry::ConstPtr& msg)
-{
-	odom_msg = *msg;
-	odom_inc = true;
-}
 
 void imu_estimator::subscribeToIMU()
 {
@@ -109,6 +101,31 @@ void imu_estimator::imuCb(const sensor_msgs::Imu::ConstPtr& msg)
 {
 	imu_msg = *msg;
 	imu_inc = true;
+}
+
+void imu_estimator::subscribeToOdom()
+{
+	odom_sub = n.subscribe(odom_topic,1,&imu_estimator::odomCb,this);
+}
+
+void imu_estimator::odomCb(const nav_msgs::Odometry::ConstPtr& msg)
+{
+	std::cout<<"2 "<<std::endl;//这里一直进来
+	odom_msg = *msg;
+	odom_inc = true;
+}
+
+
+void imu_estimator::subscribeToVO()
+{
+	vo_sub = n.subscribe(camera_vo_topic,1000,&imu_estimator::voCb,this);
+}
+
+void imu_estimator::voCb(const geometry_msgs::PoseStamped::ConstPtr& msg)
+{
+	std::cout<<"1 "<<std::endl;//这里进不来
+	vo_msg = *msg;
+	vo_inc = true;
 }
 
 void imu_estimator::subscribeToTwist()
@@ -122,22 +139,7 @@ void imu_estimator::twistCb(const geometry_msgs::TwistStamped::ConstPtr& msg)
 	twist_inc = true;
 }
 
-
-
-
-void imu_estimator::subscribeToVO()
-{
-	vo_sub = n.subscribe(camera_vo_topic,1000,&imu_estimator::voCb,this);
-}
-
-void imu_estimator::voCb(const geometry_msgs::PoseStamped::ConstPtr& msg)
-{
-	vo_msg = *msg;
-	vo_inc = true;
-}
-
-
-imu_estimator::imu_estimator() 
+imu_estimator::imu_estimator()  //imu_estimator这个构造函数刚开始的时候是什么都不用的
 {
 	useVO = false;
 	useOdom = false;
@@ -168,9 +170,10 @@ bool imu_estimator::connect(const ros::NodeHandle nh) {
 	// Load IMU parameters
 	loadIMUEKFparams();
 
-	dynamic_recfg_ = boost::make_shared< dynamic_reconfigure::Server<imu_ekf::ParamControlConfig> >(n);
+	//后面这段重新从paramcontrol.cfg中读了一遍imu参数，把前面的都覆盖读了一遍
+	/*dynamic_recfg_ = boost::make_shared< dynamic_reconfigure::Server<imu_ekf::ParamControlConfig> >(n);
     dynamic_reconfigure::Server<imu_ekf::ParamControlConfig>::CallbackType cb = boost::bind(&imu_estimator::reconfigureCB, this, _1, _2);
-    dynamic_recfg_->setCallback(cb);
+    dynamic_recfg_->setCallback(cb);*/
 
 	// Subscribe/Publish ROS Topics/Services
 	subscribe();
@@ -193,13 +196,19 @@ void imu_estimator::subscribe()
 	subscribeToIMU();
 
 	if (useVO)
+	{	
+		
 		subscribeToVO();
-	else if(useOdom)
+	}
+	//else if(useOdom)
+	if(useOdom)
+	{
+		
 		subscribeToOdom();
+	}
+		
 	if(useTwist)
 		subscribeToTwist();
-	
-
 	sleep(1.0);
 
 }
@@ -251,6 +260,8 @@ void imu_estimator::reconfigureCB(imu_ekf::ParamControlConfig& config, uint32_t 
 
 void imu_estimator::run() {
 	while (ros::ok()) {
+
+		//是否用imu作为预测
 		predictWithImu = false;
 		static ros::Rate rate(freq);  //ROS Node Loop Rate
 
@@ -271,6 +282,7 @@ void imu_estimator::estimateWithIMUEKF()
 		//Initialize the IMU EKF state
 		if (imuEKF->firstrun) {
 			imuEKF->setdt(1.0/freq);
+			//std::cout<<freq<<std::endl; 这个也会根据那个文件更改
 			imuEKF->setBodyPos(Vector3d(0,0,0));
 			imuEKF->setBodyOrientation(Matrix3d::Identity());
 			imuEKF->setAccBias(Vector3d(biasAX, biasAY, biasAZ));
@@ -278,15 +290,12 @@ void imu_estimator::estimateWithIMUEKF()
 			imuEKF->firstrun = false;
 		}
 
-
-
-
 		//Compute the attitude and posture with the IMU-Kinematics Fusion
 		
 		//Predict Step
 		//Predict with the IMU gyro and acceleration
-		if(imu_inc && !predictWithImu &&!imuEKF->firstrun){
-			//std::cout<<"Imu "<<std::endl;
+		if(imu_inc &&!imuEKF->firstrun){
+			//std::cout<<"predictWithImu "<<std::endl;
 			imuEKF->timestamps=imu_msg.header.stamp.sec+imu_msg.header.stamp.nsec*1e-9;
 			imuEKF->predict(Vector3d(imu_msg.angular_velocity.x,imu_msg.angular_velocity.y,imu_msg.angular_velocity.z),
 			Vector3d(imu_msg.linear_acceleration.x,imu_msg.linear_acceleration.y,imu_msg.linear_acceleration.z));
@@ -294,43 +303,46 @@ void imu_estimator::estimateWithIMUEKF()
 			predictWithImu = true;
 		}
 
-
 		//UPDATE STEP
-		//Update with the odometry
 		if(useOdom)
 		{
-			if(odom_inc && predictWithImu){
-				//std::cout<<"Odom "<<std::endl;
+			//std::cout<<"useOdom "<<std::endl; //这个是会进来的
+			if(odom_inc ) // if(odom_inc && !predictWithImu)
+			{
+				//std::cout<<"Odom "<<std::endl; //这个是会进来的
 				imuEKF->timestamps=odom_msg.header.stamp.sec+odom_msg.header.stamp.nsec*1e-9;
 				imuEKF->updateWithOdom(Vector3d(odom_msg.pose.pose.position.x,odom_msg.pose.pose.position.y,odom_msg.pose.pose.position.z),
 				Quaterniond(odom_msg.pose.pose.orientation.w,odom_msg.pose.pose.orientation.x,odom_msg.pose.pose.orientation.y,odom_msg.pose.pose.orientation.z));
 				odom_inc = false;
+				predictWithImu= false;
 			}
 		}
-		else if(useVO)
+		//else if(useVO)
+		if(useVO)
 		{
-			if(vo_inc && predictWithImu)
+			//1028.bag这个数据刚开始VO漂移了，数据比较差就去掉了，所以开始监听不到VO
+			if(vo_inc ) // if(vo_inc && !predictWithImu)
 			{
+				std::cout<<"VO "<<std::endl; 
 				imuEKF->timestamps=vo_msg.header.stamp.sec+vo_msg.header.stamp.nsec*1e-9;
 				imuEKF->updatewithVO(Vector3d(vo_msg.pose.position.x,vo_msg.pose.position.y,vo_msg.pose.position.z),
 				Quaterniond(vo_msg.pose.orientation.w,vo_msg.pose.orientation.x,vo_msg.pose.orientation.y,vo_msg.pose.orientation.z));
 				vo_inc = false;
+				predictWithImu= false;
 			}
 		}
-		else if(useTwist)
+		if(useTwist)
 		{		
-			if(twist_inc && predictWithImu)
+			if(twist_inc ) //if(odom_inc && !predictWithImu)
 			{
 				imuEKF->timestamps=twist_msg.header.stamp.sec+twist_msg.header.stamp.nsec*1e-9;
 				imuEKF->updateWithTwist(Vector3d(twist_msg.twist.linear.x,twist_msg.twist.linear.y,twist_msg.twist.linear.z),
 				Quaterniond(imu_msg.orientation.w,imu_msg.orientation.x,imu_msg.orientation.y,imu_msg.orientation.z));
 				twist_inc = false;
+				predictWithImu= false;
 			}
 		}
-		else 
-			std::cout<<"No Update"<<std::endl;
-			
-		
+				
 }
 
 
@@ -339,9 +351,6 @@ void imu_estimator::deAllocate()
 {
 	delete imuEKF;
 }
-
-
-
 
 
 void imu_estimator::publishBodyEstimates() {

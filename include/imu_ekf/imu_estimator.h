@@ -105,6 +105,8 @@ private:
 	 void voCb(const geometry_msgs::PoseStamped::ConstPtr& msg);
 	 void odomCb(const nav_msgs::Odometry::ConstPtr& msg);
 	 void twistCb(const geometry_msgs::TwistStamped::ConstPtr& msg);
+
+	 //reconfigureCB是用来做什么的？
 	 void reconfigureCB(imu_ekf::ParamControlConfig& config, uint32_t level);
 
 	//private methods

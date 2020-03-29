@@ -48,10 +48,13 @@ void IMUEKF::init()
 
 	/*Initialize the state **/
 
-	//Rotation Matrix from Inertial to body frame
+	//Rotation Matrix from Inertial to body frame  也就是body系(imu系)和惯性系(世界系)开始是重合的
 	Rib = Matrix3d::Identity();
 
 	x = Matrix<double,15,1>::Zero();
+	
+	//x = 100*Matrix<double,15,1>::Ones();
+	
 
 	//Initializing w.r.t NAO Robot -- CHANGE IF NEEDED
 
@@ -112,8 +115,6 @@ void IMUEKF::init()
 }
 
 /** ------------------------------------------------------------- **/
-
-
 /** IMU EKF filter to  deal with the Noise **/
 void IMUEKF::predict(Vector3d omega_, Vector3d f_)
 {
@@ -121,9 +122,9 @@ void IMUEKF::predict(Vector3d omega_, Vector3d f_)
 	f = f_;
 
 	// relative velocity
-	v = x.segment<3>(0);
+	v = x.segment<3>(0); //前三位是相对速度
 	// absolute position
-	r = x.segment<3>(6);
+	r = x.segment<3>(6);//6到9是绝对位置
 	// biases
 	bw = x.segment<3>(9);
 	bf = x.segment<3>(12);
@@ -134,7 +135,7 @@ void IMUEKF::predict(Vector3d omega_, Vector3d f_)
 
 	/** Linearization **/
 	//Transition matrix Jacobian
-	Acf.block<3,3>(0,0) = -wedge(omegahat);
+	Acf.block<3,3>(0,0) = -wedge(omegahat); //改正的角速度读数的反对称矩阵
 	Acf.block<3,3>(0,3) = wedge(Rib.transpose() * g);
 	Acf.block<3,3>(3,3) = -wedge(omegahat);
 	Acf.block<3,3>(6,0) = Rib;
@@ -142,9 +143,6 @@ void IMUEKF::predict(Vector3d omega_, Vector3d f_)
 	Acf.block<3,3>(0,9) = -wedge(v);
 	Acf.block<3,3>(0,12) = -Matrix3d::Identity();
 	Acf.block<3,3>(3,9) = -Matrix3d::Identity();
-
-	
-
 	
 	//State Noise Jacobian
 	//gyro (0),acc (3),gyro_bias (6),acc_bias (9),foot_pos (12),foot_psi (15)		
@@ -171,7 +169,6 @@ void IMUEKF::predict(Vector3d omega_, Vector3d f_)
 	
 
 	//Euler Discretization - ZOH
-	
 	Af = If;
 	Af.noalias() +=  Acf * dt;
 	Qff.noalias() =  Af * Lcf * Qf * Lcf.transpose() * Af.transpose() * dt ;
@@ -184,16 +181,16 @@ void IMUEKF::predict(Vector3d omega_, Vector3d f_)
 	temp = v.cross(omegahat) + Rib.transpose() * g + fhat;
 	temp *= dt;
 	
-	x(0) = v(0) + temp(0);
+	x(0) = v(0) + temp(0); //速度
 	x(1) = v(1) + temp(1);
 	x(2) = v(2) + temp(2);
 
 	x(3) = 0;
-	x(4) = 0;
+	x(4) = 0; //姿态怎么预测直接变0？
 	x(5) = 0;
 
 	//Body position
-	temp = Rib * v;
+	temp = Rib * v; //位移
 	temp *= dt;
 	x(6) = r(0) + temp(0);
 	x(7) = r(1) + temp(1);
@@ -209,14 +206,62 @@ void IMUEKF::predict(Vector3d omega_, Vector3d f_)
 	x(13) = bf(1);
 	x(14) = bf(2);
 
-	
 
-	//Propagate only if non-zero input
+	//Propagate only if non-zero input 只在不是0输入的时候更新
 	temp = omegahat;
-	temp *= dt;
+	temp *= dt; // temp=omegahat*dt 也就是陀螺仪输入乘上dt就是角度变化,omegahat是一个三维向量
 	if (temp(0) != 0.0000 && temp(1) != 0.0000 && temp(2) != 0.0000) {
-		Rib  *=  expMap(temp, 1.0);
+		Rib  *=  expMap(temp, 1.0); //expMap是Rodriguez Formula,temp是陀螺仪输出的一个小角度，转成了矩阵
 	}
+	updateVars();
+	//std::cout<<x<<std::endl;
+}
+
+
+
+void IMUEKF::updateWithOdom(Vector3d y, Quaterniond qy)
+{
+	Hf.noalias() = Matrix<double,6,15>::Zero();
+	R(0, 0) = KinSTDx * KinSTDx;
+	R(1, 1) = KinSTDy * KinSTDy;
+	R(2, 2) = KinSTDz * KinSTDz;
+	R(3, 3) = KinSTDOrientx * KinSTDOrientx;
+	R(4, 4) = KinSTDOrienty * KinSTDOrienty;
+	R(5, 5) = KinSTDOrientz * KinSTDOrientz;
+	
+	//std::cout<<"R="<<std::endl<<R<<std::endl;
+	r = x.segment<3>(6);
+	//Innovetion vector
+	z.segment<3>(0).noalias() = y - r;
+	Hf.block<3,3>(0,6) = Matrix3d::Identity();
+
+	Quaterniond qib(Rib);
+	z.segment<3>(3) = logMap( (qy * qib.inverse() ));
+	//std::cout<<"z.segment<3>(3)="<<std::endl<<z.segment<3>(3)<<std::endl; // 第一个历元输出 0.0722031  -1.90441 -0.00799845
+
+	Hf.block<3,3>(3,3) = Matrix3d::Identity();
+
+	s = R;
+	s.noalias() += Hf * P * Hf.transpose();
+	Kf.noalias() = P * Hf.transpose() * s.inverse();
+
+	dxf.noalias() = Kf * z;
+	//std::cout<<"x="<<std::endl<<x<<std::endl;
+
+	//Update the mean estimate
+	x += dxf;
+	//std::cout<<"dxf="<<std::endl<<dxf<<std::endl;
+	//exit(0);
+	//Update the error covariance
+	P = (If - Kf * Hf) * P * (If - Kf * Hf).transpose() + Kf * R * Kf.transpose();
+
+	if (dxf(3) != 0.000 && dxf(4) != 0.000 && dxf(5) != 0.000) {
+		temp(0) = dxf(3);
+		temp(1) = dxf(4);
+		temp(2) = dxf(5);
+		Rib *=  expMap(dxf.segment<3>(3), 1.0);
+	}
+	x.segment<3>(3) = Vector3d::Zero();
 	updateVars();
 }
 
@@ -228,27 +273,21 @@ void IMUEKF::updatewithVO(Vector3d y, Quaterniond qy){
 		R(0, 0) = KinSTDx * KinSTDx;
 		R(1, 1) = KinSTDy * KinSTDy;
 		R(2, 2) = KinSTDz * KinSTDz;
-
 		R(3, 3) = KinSTDOrientx * KinSTDOrientx;
 		R(4, 4) = KinSTDOrienty * KinSTDOrienty;
 		R(5, 5) = KinSTDOrientz * KinSTDOrientz;
 		R /=dt;
 		r = x.segment<3>(6);
 
-
 		//Innovetion vector
 		z.segment<3>(0).noalias() = y - r;
 
-
 		Hf.block<3,3>(0,6) = Matrix3d::Identity();
-
 
 		Quaterniond qib(Rib);
 		z.segment<3>(3) = logMap( (qy * qib.inverse() ));
 
 		Hf.block<3,3>(3,3) = Matrix3d::Identity();
-
-
 
         s = R;
 		s.noalias() += Hf * P * Hf.transpose();
@@ -262,71 +301,20 @@ void IMUEKF::updatewithVO(Vector3d y, Quaterniond qy){
 		//Update the error covariance
 		P = (If - Kf * Hf) * P * (If - Kf * Hf).transpose() + Kf * R * Kf.transpose();
 
-
 		if (dxf(3) != 0.000 && dxf(4) != 0.000 && dxf(5) != 0.000) {
 			temp(0) = dxf(3);
 			temp(1) = dxf(4);
 			temp(2) = dxf(5);
-			Rib *=  expMap(dxf.segment<3>(3), 1.0);
+			Rib *=  expMap(dxf.segment<3>(3), 1.0);//这里是姿态更新
 		}
-		x.segment<3>(3) = Vector3d::Zero();
+
+		x.segment<3>(3) = Vector3d::Zero();//这里姿态又清零了，姿态用的是Rib
 
 		updateVars();
 }
 
 
 
-void IMUEKF::updateWithOdom(Vector3d y, Quaterniond qy)
-{
-	Hf.noalias() = Matrix<double,6,15>::Zero();
-
-	R(0, 0) = KinSTDx * KinSTDx;
-	R(1, 1) = KinSTDy * KinSTDy;
-	R(2, 2) = KinSTDz * KinSTDz;
-
-	R(3, 3) = KinSTDOrientx * KinSTDOrientx;
-	R(4, 4) = KinSTDOrienty * KinSTDOrienty;
-	R(5, 5) = KinSTDOrientz * KinSTDOrientz;
-
-	r = x.segment<3>(6);
-
-
-	//Innovetion vector
-	z.segment<3>(0).noalias() = y - r;
-
-
-	Hf.block<3,3>(0,6) = Matrix3d::Identity();
-
-
-	Quaterniond qib(Rib);
-	z.segment<3>(3) = logMap( (qy * qib.inverse() ));
-
-	Hf.block<3,3>(3,3) = Matrix3d::Identity();
-
-
-
-	s = R;
-	s.noalias() += Hf * P * Hf.transpose();
-	Kf.noalias() = P * Hf.transpose() * s.inverse();
-
-	dxf.noalias() = Kf * z;
-
-	//Update the mean estimate
-	x += dxf;
-
-	//Update the error covariance
-	P = (If - Kf * Hf) * P * (If - Kf * Hf).transpose() + Kf * R * Kf.transpose();
-
-
-	if (dxf(3) != 0.000 && dxf(4) != 0.000 && dxf(5) != 0.000) {
-		temp(0) = dxf(3);
-		temp(1) = dxf(4);
-		temp(2) = dxf(5);
-		Rib *=  expMap(dxf.segment<3>(3), 1.0);
-	}
-	x.segment<3>(3) = Vector3d::Zero();
-	updateVars();
-}
 
 
 		/** Update **/

@@ -1,12 +1,13 @@
-imu_topic_freq: 100
+imu_topic_freq: 200
 gravity: 9.80665
 
 useOdom: true
-useVO: false
+useVO: true
 useTwist: false
-camera_vo_topic: "pose"
-odom_topic: "/firefly_sbx/vio/odom"
-imu_topic: "/imu0"
+camera_vo_topic: "vinReNoOutlier"
+odom_topic: "/aft_mapped_to_init"
+imu_topic: "/imu/data"
+#imu_topic: "/fcu/imu"
 twist_topic: "twist"
 #Process Noise STDs
 AccBiasSTDx:  0.000382554 #  m/s^2/sqrt(Hz)
@@ -29,10 +30,12 @@ KinSTDz: 1.0e-04
 KinSTDOrientx: 1.0e-02
 KinSTDOrienty: 1.0e-02
 KinSTDOrientz: 1.0e-02
+
 #IMU Initial Biases
 biasAX:  0.239618
 biasAY: 0.0751756
-biasAZ: -20.0327
+#biasAZ: -20.0327
+biasAZ: 0.0327
 biasGX:  -0.000817362
 biasGY:  -0.00178242
 biasGZ:  0.000158554
